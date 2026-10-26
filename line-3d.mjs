@@ -87,8 +87,15 @@ function updateTaktLesson() {
   $('#output-detail').textContent = `units · demand is ${demand} / shift`;
   const status = $('#capacity-status');
   status.dataset.state = plan.meetsDemand ? 'ok' : 'short';
-  $('#capacity-title').textContent = plan.meetsDemand ? 'This line meets the demand rate' : 'Capacity shortfall · bottleneck is slower than takt';
-  $('#capacity-detail').textContent = `Bottleneck ${plan.bottleneckSeconds.toFixed(0)} sec ${plan.meetsDemand ? '≤' : '>'} takt ${seconds} sec. ${plan.meetsDemand ? 'The slowest operator can keep pace with the customer beat.' : 'At this bottleneck the line cannot keep pace; rebalance work or add capacity.'} Theoretical shift output is about ${plan.theoreticalUnitsPerShift.toFixed(1)} units.`;
+  $('#capacity-title').textContent = !plan.meetsDemand
+    ? 'Capacity shortfall · bottleneck is slower than takt'
+    : plan.modeledShiftShortfall > 0
+      ? `Steady rate meets takt · empty-line shift is ${plan.modeledShiftShortfall} unit${plan.modeledShiftShortfall===1?'':'s'} short`
+      : 'Steady-state rate meets customer demand';
+  const requiredUph = plan.requiredUnitsPerHour.toFixed(1);
+  const capacityUph = plan.theoreticalUnitsPerHour.toFixed(1);
+  const capacityGap = plan.hourlyCapacityShortfall.toFixed(1);
+  $('#capacity-detail').textContent = `Bottleneck ${plan.bottleneckSeconds.toFixed(0)} sec ${plan.meetsDemand ? '≤' : '>'} takt ${seconds} sec. Customer demand requires ${requiredUph} UPH; the bottleneck supports ${capacityUph} theoretical UPH.${plan.meetsDemand ? ' The line can keep pace at steady state.' : ` The shortfall is ${capacityGap} UPH; rebalance work or add capacity.`} From an empty line, this model completes ${plan.modeledShiftOutput} units in ${availableMinutes} net minutes because first-unit work must finish before the bottleneck rhythm begins.${plan.modeledShiftShortfall > 0 ? ` That leaves the empty-start shift ${plan.modeledShiftShortfall} unit${plan.modeledShiftShortfall===1?'':'s'} below demand; starting WIP or pre-shift production can change this result.` : ''}`;
   $('#apply-note').textContent = plan.minimumOperators > 12
     ? 'The estimate exceeds the 12-operator demo limit; reduce work content or revise the planning inputs.'
     : `Evenly divide ${plan.workContentSeconds.toFixed(0)} sec of assumed manual work across ${plan.minimumOperators} operators. Task sequence and feasibility still need review.`;
@@ -328,6 +335,14 @@ $('#scenario').addEventListener('change',event=>{
   } else if (value==='before') {
     line=BEFORE_LINE.map(station=>({...station}));
     activeScenario='Illustrative before-improvement values';
+  } else if (value==='rate-check') {
+    $('#available-minutes').value='60';
+    $('#customer-demand').value='120';
+    line=[
+      {id:'rate-check-1',name:'Operator 1',cycleSeconds:35},
+      {id:'rate-check-2',name:'Operator 2',cycleSeconds:25},
+    ];
+    activeScenario='Worked check · 30 s takt / 35 s bottleneck';
   } else if (selected) {
     line=selected.stations.map(item=>({...item}));
     activeScenario=`Your saved line · ${selected.name}`;
@@ -338,6 +353,11 @@ $('#available-minutes').addEventListener('input',updateTaktLesson);
 $('#customer-demand').addEventListener('input',updateTaktLesson);
 $('#reset-planning').addEventListener('click',()=>{
   $('#available-minutes').value='450'; $('#customer-demand').value='110'; updateTaktLesson();
+});
+$('#load-rate-example').addEventListener('click',()=>{
+  $('#scenario').value='rate-check';
+  $('#scenario').dispatchEvent(new Event('change'));
+  $('#balance-chart').scrollIntoView({behavior:'smooth',block:'center'});
 });
 $('#apply-staffing').addEventListener('click',()=>{
   const plan=calculateTaktPlan({availableTimeSeconds:Number($('#available-minutes').value)*60,customerDemand:Number($('#customer-demand').value),stations:line});

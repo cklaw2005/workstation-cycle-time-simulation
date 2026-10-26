@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict';
 import { readFile } from 'node:fs/promises';
-import { outputCountAt } from './line-model.mjs';
-import { buildUStationLayout } from './u-layout.mjs';
-import { getUnitSchedule } from './line-schedule.mjs';
+import { outputCountAt } from './dist/line-model.mjs';
+import { buildUStationLayout } from './dist/u-layout.mjs';
+import { getUnitSchedule } from './dist/line-schedule.mjs';
 
 for (const count of [1, 8, 12]) {
   const layout = buildUStationLayout(count);
@@ -25,11 +25,17 @@ assert.deepEqual([145, 204.99, 205, 264.99, 265].map(t => outputCountAt(t, examp
 assert.throws(() => getUnitSchedule(example, -1), RangeError);
 assert.throws(() => getUnitSchedule([], 0), RangeError);
 
-const html = await readFile(new URL('./line-3d.html', import.meta.url), 'utf8');
+const html = await readFile(new URL('./dist/line-3d.html', import.meta.url), 'utf8');
 assert.match(html, /id="available-minutes"/);
 assert.match(html, /id="customer-demand"/);
 assert.match(html, /bottleneck cycle time must be less than or equal to takt time/i);
 assert.match(html, /id="capacity-status"/);
+assert.match(html, /TAKT TIME · customer pace/);
+assert.match(html, /BOTTLENECK · line limiter/);
+assert.match(html, /UPH · units per hour/);
+assert.match(html, /30-second takt vs 35-second bottleneck/);
+assert.match(html, /value="rate-check"/);
+assert.match(html, /id="load-rate-example"/);
 assert.match(html, /Before improvement · 6 operators/);
 assert.match(html, /After improvement · 3 operators/);
 

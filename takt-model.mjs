@@ -13,6 +13,9 @@ export function calculateTaktPlan({availableTimeSeconds, customerDemand, station
   if (!Number.isInteger(demand)) throw new RangeError('Customer demand must be a whole number of units.');
   const summary = summarizeLine(stations);
   const taktSeconds = available / demand;
+  const requiredUnitsPerHour = demand / (available / 3600);
+  const theoreticalUnitsPerHour = summary.unitsPerHour;
+  const modeledShiftOutput = outputCountAt(available, stations);
   const minimumOperators = Math.max(1, Math.ceil(summary.totalWorkSeconds / taktSeconds - 1e-10));
   return {
     availableTimeSeconds: available,
@@ -22,8 +25,11 @@ export function calculateTaktPlan({availableTimeSeconds, customerDemand, station
     minimumOperators,
     bottleneckSeconds: summary.bottleneckSeconds,
     meetsDemand: summary.bottleneckSeconds <= taktSeconds + 1e-9,
-    modeledShiftOutput: outputCountAt(available, stations),
-    theoreticalUnitsPerShift: available / summary.bottleneckSeconds,
+    requiredUnitsPerHour,
+    theoreticalUnitsPerHour,
+    hourlyCapacityShortfall: Math.max(0, requiredUnitsPerHour - theoreticalUnitsPerHour),
+    modeledShiftOutput,
+    modeledShiftShortfall: Math.max(0, demand - modeledShiftOutput),
   };
 }
 
