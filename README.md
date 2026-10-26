@@ -14,7 +14,7 @@ Serve the repository root with any static HTTP server, for example:
 python -m http.server 8080
 ```
 
-Open `http://localhost:8080`. No build step, API keys, or backend are required. The 3D view uses vendored Three.js and OrbitControls; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+Open `http://localhost:8080`. No build step, API keys, or backend are required. The 3D view loads Three.js 0.180.0 from jsDelivr and uses the bundled OrbitControls module; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Features
 
@@ -36,5 +36,4 @@ node test-line-builder.mjs
 node test-line-3d.mjs
 ```
 
-The project-specific code has no separate license file. Vendored Three.js components retain their included license and notice.
-
+The project-specific code has no separate license file. The Three.js and OrbitControls dependencies retain their included license and notice.

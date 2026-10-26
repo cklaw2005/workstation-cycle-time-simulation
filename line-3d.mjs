@@ -1,0 +1,262 @@
+import * as THREE from 'three';
+import { OrbitControls } from './vendor/OrbitControls.js';
+import { outputCountAt, summarizeLine } from './line-model.mjs';
+import { parseSavedScenarios } from './line-builder-state.mjs';
+import { getUnitSchedule } from './line-schedule.mjs';
+import { buildUStationLayout } from './u-layout.mjs';
+
+const STORAGE_KEY = 'workstation-cycle-time-scenarios-v1';
+const DEMO_LINE = [40, 60, 45, 48, 50, 52, 55, 50].map((cycleSeconds, index) => ({
+  id: `demo-${index + 1}`, name: `Station ${index + 1}`, cycleSeconds,
+}));
+const $ = selector => document.querySelector(selector);
+const sceneHost = $('#scene-wrap');
+const warning = $('#error');
+let line = DEMO_LINE.map(station => ({...station}));
+let scenarios = [];
+let activeScenario = '';
+let elapsed = 0;
+let running = false;
+let lastFrame = 0;
+let raf = 0;
+let scene, camera, renderer, controls;
+let stationMeshes = [];
+let partMeshes = [];
+let tags = [];
+let bottleneckIndex = 0;
+let resizeObserver;
+const materials = {};
+
+function material(name, color, roughness = 0.78) {
+  materials[name] ??= new THREE.MeshStandardMaterial({color, roughness});
+  return materials[name];
+}
+
+function formatTime(seconds) {
+  const whole = Math.floor(Math.max(0, seconds));
+  const hours = Math.floor(whole / 3600), mins = Math.floor(whole % 3600 / 60), secs = whole % 60;
+  return hours ? `${String(hours).padStart(2,'0')}:${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}` : `${String(mins).padStart(2,'0')}:${String(secs).padStart(2,'0')}`;
+}
+
+function updateSummary() {
+  const summary = summarizeLine(line);
+  bottleneckIndex = line.findIndex(station => Number(station.cycleSeconds) === summary.bottleneckSeconds);
+  $('#station-count').textContent = String(line.length);
+  $('#scenario-name').textContent = activeScenario ? `Scenario · ${activeScenario}` : 'Illustrative example values';
+  $('#bottleneck').textContent = summary.bottleneckStations.join(', ');
+  $('#bottleneck-time').textContent = `${summary.bottleneckSeconds.toLocaleString(undefined,{maximumFractionDigits:2})} sec / unit`;
+  $('#throughput').textContent = summary.unitsPerHour.toLocaleString(undefined,{maximumFractionDigits:2});
+  $('#line-title').textContent = `${line.length} workstations · U-shaped schematic view`;
+  updateClock();
+}
+
+function updateClock() {
+  const summary = summarizeLine(line);
+  const completed = outputCountAt(elapsed, line);
+  const remaining = completed === 0 ? summary.totalWorkSeconds - elapsed : summary.totalWorkSeconds + completed * summary.bottleneckSeconds - elapsed;
+  $('#clock').textContent = formatTime(elapsed);
+  $('#output').textContent = String(completed);
+  $('#target').textContent = completed === 0 ? `First unit target in ${formatTime(remaining)}` : `Next unit target in ${formatTime(remaining)}`;
+}
+
+function addBox(parent, size, position, color, name, radius = 0.08) {
+  const geometry = new THREE.BoxGeometry(...size);
+  const mesh = new THREE.Mesh(geometry, material(name, color));
+  mesh.position.set(...position);
+  mesh.castShadow = false; mesh.receiveShadow = true;
+  parent.add(mesh);
+  return mesh;
+}
+
+function addCylinder(parent, radiusTop, radiusBottom, height, position, color, name, sides = 10) {
+  const mesh = new THREE.Mesh(new THREE.CylinderGeometry(radiusTop, radiusBottom, height, sides), material(name, color));
+  mesh.position.set(...position);
+  parent.add(mesh);
+  return mesh;
+}
+
+function addOperator(parent, x, z) {
+  const person = new THREE.Group();
+  person.position.set(x, 0, z);
+  parent.add(person);
+  addCylinder(person, .2, .24, .62, [0,.66,0], 0xd18431, 'operator-shirt', 8);
+  addCylinder(person, .075, .095, .38, [0,.28,0], 0x263846, 'operator-trousers', 8);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(.16,10,8), material('operator-head',0xe8b994));
+  head.position.set(0,1.08,.01); person.add(head);
+  addBox(person,[.12,.34,.12],[-.12,.65,.21],0xe0a777,'operator-arm');
+  addBox(person,[.12,.34,.12],[.13,.65,.21],0xe0a777,'operator-arm');
+}
+
+function clearStationScene() {
+  for (const tag of tags) tag.remove();
+  tags = [];
+  for (const object of [...stationMeshes, ...partMeshes]) {
+    scene.remove(object);
+    object.traverse(child => { if (child.geometry) child.geometry.dispose(); });
+  }
+  stationMeshes = []; partMeshes = [];
+}
+
+function makeStation(station, index, point) {
+  const group = new THREE.Group();
+  group.position.set(point.x,0,point.z);
+  group.rotation.y = point.rotationY;
+  scene.add(group); stationMeshes.push(group);
+  const table = addBox(group,[1.5,.85,1.05],[0,.62,0],0x387d79,'machine-body');
+  addBox(group,[1.57,.12,1.1],[0,1.1,0],0xaac1bb,'machine-top');
+  addBox(group,[.67,.52,.08],[0,1.43,-.31],0x203541,'machine-screen');
+  addBox(group,[.56,.39,.035],[0,1.44,-.26],0x83bdad,'machine-screen-glass');
+  addBox(group,[.34,.18,.24],[.35,1.26,.1],0xe4b85f,'fixture');
+  addCylinder(group,.045,.045,.08,[.42,1.39,.1],0x293e48,'fixture-post',8);
+  addBox(group,[.57,.38,.58],[-.52,.22,.48],0x788c84,'input-bin');
+  addOperator(group,.78,.77);
+  const label = document.createElement('div');
+  label.className = `station-tag${index === bottleneckIndex ? ' bottleneck' : ''}`;
+  const title = document.createElement('strong'); title.textContent = `${index + 1} · ${station.name}`;
+  const cycle = document.createElement('span'); cycle.textContent = `${Number(station.cycleSeconds).toLocaleString(undefined,{maximumFractionDigits:2})} sec / unit`;
+  label.append(title,cycle); sceneHost.append(label); tags.push(label);
+  return {group, table, point};
+}
+
+function buildRoute(layout) {
+  const points = layout.map(point => new THREE.Vector3(point.x,.035,point.z));
+  if (points.length > 1) {
+    const curve = new THREE.CatmullRomCurve3(points, false, 'centripetal');
+    const route = new THREE.Mesh(new THREE.TubeGeometry(curve,Math.max(32,points.length*8),.025,5,false),material('route',0x789b9b));
+    scene.add(route); stationMeshes.push(route);
+  }
+  layout.forEach((point,index) => {
+    if (index === layout.length - 1) return;
+    const next = layout[index+1];
+    const arrow = new THREE.Mesh(new THREE.ConeGeometry(.11,.3,6),material('route-arrow',0x527e80));
+    arrow.position.set((point.x+next.x)/2,.08,(point.z+next.z)/2);
+    arrow.rotation.x = Math.PI/2;
+    arrow.rotation.y = -Math.atan2(next.x-point.x,next.z-point.z);
+    scene.add(arrow); stationMeshes.push(arrow);
+  });
+}
+
+function buildScene() {
+  clearStationScene();
+  const layout = buildUStationLayout(line.length);
+  buildRoute(layout);
+  line.forEach((station,index) => makeStation(station,index,layout[index]));
+  const floor = addBox(scene,[12.2,.08,8.2],[0,-.14,0],0xf8fbfc,'floor');
+  stationMeshes.push(floor);
+  const grid = new THREE.GridHelper(11.7,24,0x9db6bd,0xcbd7db);
+  grid.position.y=-.08; scene.add(grid); stationMeshes.push(grid);
+  for (let index=0; index<24; index++) {
+    const part = new THREE.Group();
+    const body = addBox(part,[.26,.16,.26],[0,.18,0],0xe6a63c,'workpiece');
+    addBox(part,[.12,.04,.12],[0,.28,0],0xf4d78d,'part-top');
+    part.visible = false; scene.add(part); partMeshes.push(part);
+  }
+  positionTags();
+}
+
+function positionTags() {
+  if (!camera || !renderer) return;
+  const rect = renderer.domElement.getBoundingClientRect();
+  line.forEach((station,index) => {
+    const group = stationMeshes.filter(object => object.isGroup)[index];
+    if (!group) return;
+    const projected = new THREE.Vector3(group.position.x,1.92,group.position.z).project(camera);
+    const visible = projected.z > -1 && projected.z < 1;
+    tags[index].style.display = visible ? 'block':'none';
+    tags[index].style.left = `${(projected.x*.5+.5)*rect.width}px`;
+    tags[index].style.top = `${(-projected.y*.5+.5)*rect.height}px`;
+  });
+}
+
+function initThree() {
+  try {
+    scene = new THREE.Scene(); scene.background = new THREE.Color(0xeaf0f2);
+    camera = new THREE.PerspectiveCamera(40,1,.1,100);
+    camera.position.set(12,11,14);
+    renderer = new THREE.WebGLRenderer({antialias:true,alpha:false,powerPreference:'low-power'});
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1,1.5));
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    sceneHost.append(renderer.domElement);
+    scene.add(new THREE.HemisphereLight(0xffffff,0x9bacad,2.1));
+    const keyLight = new THREE.DirectionalLight(0xffffff,2.2); keyLight.position.set(-4,10,7); scene.add(keyLight);
+    controls = new OrbitControls(camera,renderer.domElement); controls.target.set(0,.3,0); controls.enableDamping=true; controls.maxPolarAngle=Math.PI*.48; controls.minDistance=9; controls.maxDistance=28;
+    resizeObserver = new ResizeObserver(resize); resizeObserver.observe(sceneHost); resize();
+    buildScene();
+    renderer.setAnimationLoop(renderFrame);
+  } catch (error) {
+    warning.textContent = `3D view could not start in this browser. Your line summary and cycle-time simulation still work. ${error.message}`;
+    warning.classList.add('visible');
+  }
+}
+
+function resize() {
+  if (!renderer || !camera) return;
+  const {width,height}=sceneHost.getBoundingClientRect();
+  if (!width || !height) return;
+  renderer.setSize(width,height,false); camera.aspect=width/height; camera.updateProjectionMatrix(); positionTags();
+}
+
+function drawParts() {
+  if (!partMeshes.length) return;
+  const firstCT = Number(line[0].cycleSeconds);
+  const latestStarted = Math.floor(elapsed/firstCT);
+  const firstVisible = Math.max(0,latestStarted-partMeshes.length+1);
+  const layout = buildUStationLayout(line.length);
+  let meshIndex=0;
+  for (let unit=firstVisible;unit<=latestStarted && meshIndex<partMeshes.length;unit++) {
+    const schedule=getUnitSchedule(line,unit);
+    const finish=schedule.at(-1).finishSeconds;
+    if (elapsed >= finish) continue;
+    const mesh=partMeshes[meshIndex++]; mesh.visible=true;
+    let stationIndex=schedule.findIndex(job=>elapsed<job.finishSeconds);
+    if (stationIndex<0) { mesh.visible=false; continue; }
+    const job=schedule[stationIndex];
+    const point=layout[stationIndex];
+    const progress=Math.max(0,Math.min(1,(elapsed-job.startSeconds)/job.cycleSeconds));
+    const previous=stationIndex ? layout[stationIndex-1] : {x:point.x-1.25*Math.sin(point.rotationY),z:point.z+1.25*Math.cos(point.rotationY)};
+    const transferShare=.16;
+    const moveProgress=Math.min(1,progress/transferShare);
+    mesh.position.set(previous.x+(point.x-previous.x)*moveProgress,.02,previous.z+(point.z-previous.z)*moveProgress);
+  }
+  while(meshIndex<partMeshes.length) partMeshes[meshIndex++].visible=false;
+}
+
+function renderFrame(timestamp) {
+  if (running && lastFrame) {
+    elapsed += (timestamp-lastFrame)/1000*Number($('#speed').value);
+    updateClock(); drawParts();
+  }
+  if (running) lastFrame=timestamp;
+  controls?.update(); renderer?.render(scene,camera); positionTags();
+}
+
+function reset() { running=false; lastFrame=0; $('#play').textContent='Start'; elapsed=0; updateClock(); drawParts(); }
+function readScenarios() {
+  try {
+    const parsed=parseSavedScenarios(localStorage.getItem(STORAGE_KEY));
+    scenarios=parsed.scenarios;
+    const select=$('#scenario');
+    for (const scenario of scenarios) { const option=document.createElement('option'); option.value=scenario.id; option.textContent=scenario.name; select.append(option); }
+    if (parsed.rejectedCount) { warning.textContent=`${parsed.rejectedCount} invalid saved scenario(s) were skipped.`; warning.classList.add('visible'); }
+  } catch { scenarios=[]; warning.textContent='Browser storage is unavailable; the example line is ready to simulate.'; warning.classList.add('visible'); }
+}
+
+$('#play').addEventListener('click',()=>{running=!running;lastFrame=0;$('#play').textContent=running?'Pause':'Start';});
+$('#reset').addEventListener('click',reset);
+$('#speed').addEventListener('change',()=>{lastFrame=0;});
+$('#scenario').addEventListener('change',event=>{
+  const selected=scenarios.find(item=>item.id===event.target.value);
+  line=selected ? selected.stations.map(item=>({...item})) : DEMO_LINE.map(item=>({...item}));
+  activeScenario=selected?.name ?? '';
+  reset(); updateSummary(); buildScene();
+});
+$('#top').addEventListener('click',()=>{
+  const topDown=camera.position.y<15;
+  camera.position.set(0,topDown ? 20 : 11,topDown ? .01 : 14);
+  camera.up.set(0,topDown?0:1,topDown?-1:0); camera.lookAt(0,0,0); controls.target.set(0,0,0); controls.update(); positionTags();
+  $('#top').textContent=topDown?'Perspective view':'Top view';
+});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&running){running=false;lastFrame=0;$('#play').textContent='Start';}});
+window.addEventListener('beforeunload',()=>{resizeObserver?.disconnect();renderer?.dispose();});
+
+readScenarios(); updateSummary(); initThree();

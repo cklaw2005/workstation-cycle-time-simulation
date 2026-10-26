@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Build a workstation cycle-time line, see its bottleneck and theoretical output, and run an illustrative clock simulation.">
+  <title>Workstation Process Cycle Time Simulation · Line Builder</title>
+  <style>
+    :root{font-family:Inter,"Segoe UI",sans-serif;color:#243242;background:#f3f5f7;font-size:15px}*{box-sizing:border-box}body{margin:0}header{background:#fff;border-bottom:1px solid #dde3e8;padding:23px max(22px,calc((100% - 1180px)/2));display:flex;justify-content:space-between;align-items:center;gap:20px}h1{font-size:26px;margin:5px 0;letter-spacing:-.6px}.eyebrow{font-size:11px;letter-spacing:2px;color:#507b79;font-weight:700}a{color:#276863}main{max-width:1180px;margin:auto;padding:25px 20px 50px}.intro{margin:0 0 17px;color:#586a78;line-height:1.5}.sample{background:#fff8e7;border:1px solid #ead6a5;border-radius:8px;padding:12px 15px;color:#654f22;margin-bottom:17px}.panel{background:#fff;border:1px solid #dce3e7;border-radius:10px;padding:18px;margin:14px 0}.panel h2{font-size:17px;margin:0 0 13px}.row-head{display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,180px) 150px;gap:10px;color:#5f6e78;font-size:12px;padding:0 2px 7px}.station{display:grid;grid-template-columns:minmax(150px,1fr) minmax(130px,180px) 150px;gap:10px;align-items:center;padding:10px 0;border-top:1px solid #edf0f2}.station input,.scenario-name{font:inherit;width:100%;padding:10px;border:1px solid #cbd5dd;border-radius:6px;color:#243242;background:#fff}.station input:focus,.scenario-name:focus,button:focus-visible,select:focus-visible{outline:3px solid #45a49c;outline-offset:2px}.station label{font-size:12px;color:#5f6e78}.station .field{display:grid;gap:4px}.actions{display:flex;gap:5px;justify-content:flex-end}.actions button{padding:8px 10px}.cycle-wrap{position:relative}.unit{position:absolute;right:10px;top:11px;color:#607481;font-size:13px;pointer-events:none}.cycle-wrap input{padding-right:47px}button,select{font:inherit;padding:10px 14px;border:1px solid #cbd5dd;border-radius:6px;background:#fff;color:#243242;cursor:pointer}button:hover{background:#f4f7f8}button.primary{background:#245f59;color:#fff;border-color:#245f59}button.danger{color:#8c3f31}.bar{display:flex;gap:9px;align-items:center;flex-wrap:wrap;margin-top:13px}.hint{font-size:12px;color:#647481}.error{color:#983c2f;font-size:13px;min-height:20px;margin-top:8px}.kpis{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}.kpi{background:#f7f9fa;border:1px solid #e3e9ec;border-radius:8px;padding:14px}.kpi span,.kpi small{display:block;color:#62727e;font-size:12px}.kpi strong{display:block;font-size:24px;margin:7px 0;color:#243242}.flow{display:flex;gap:10px;align-items:stretch;overflow-x:auto;padding:8px 1px}.flow-card{flex:1 0 145px;max-width:220px;position:relative;border:1px solid #cbd8dc;border-top:4px solid #377e79;border-radius:8px;background:#f9fbfb;padding:13px}.flow-card.bottleneck{border-color:#ca9b44;border-top-color:#ca8c22;background:#fffaf0}.flow-card strong,.flow-card span{display:block}.flow-card span{font-size:12px;color:#61727e;margin-top:7px}.arrow{align-self:center;color:#738590;font-size:20px}.save-grid{display:grid;grid-template-columns:1fr auto auto;gap:8px;align-items:end}.save-grid label{display:grid;gap:5px;font-size:12px;color:#5f6e78}.saved-select{min-width:230px}.clockbar{display:flex;gap:10px;align-items:center;flex-wrap:wrap}.clock{font:500 26px Consolas,monospace;margin-left:auto}.output{font-size:13px;color:#526672;min-height:21px;margin-top:10px}.note{font-size:12px;color:#647481;line-height:1.55;margin:12px 0 0}.notice{font-size:12px;color:#415c59;background:#eef6f4;padding:10px 12px;border-radius:6px;margin-top:12px}.hidden{display:none}@media(max-width:720px){header{align-items:flex-start;padding:17px 18px}h1{font-size:22px}main{padding:17px 13px}.row-head{display:none}.station{grid-template-columns:1fr 1fr}.station .actions{grid-column:1/-1;justify-content:flex-start}.kpis{grid-template-columns:repeat(2,minmax(0,1fr))}.save-grid{grid-template-columns:1fr 1fr}.save-grid label:first-child{grid-column:1/-1}.clock{margin-left:0}}@media(max-width:400px){.kpis{grid-template-columns:1fr 1fr}.kpi{padding:10px}.kpi strong{font-size:20px}.save-grid{grid-template-columns:1fr}.save-grid label:first-child{grid-column:auto}}
+  </style>
+</head>
+<body>
+  <header>
+    <div><div class="eyebrow">WORKSTATION PROCESS CYCLE TIME SIMULATION</div><h1>Build a production line</h1><div class="hint">Set station names and cycle times, then see the line's limiting pace.</div></div>
+    <nav style="display:flex;gap:16px;flex-wrap:wrap"><a href="./line-3d.html">Open 3D simulation ↗</a><a href="./index.html">Project home ↗</a></nav>
+  </header>
+  <main>
+    <p class="intro">Create a simple workstation line in seconds per unit. The summary updates as you edit, so you can test alternate staffing or task allocations.</p>
+    <div class="sample"><strong>Example values:</strong> this starter uses 40 / 60 / 45 seconds per unit to demonstrate the calculator. They are illustrative values, not measured production data. Replace them with your own study.</div>
+    <section class="panel" aria-labelledby="line-title">
+      <h2 id="line-title">Workstations <span class="hint">(1–12 stations)</span></h2>
+      <div class="row-head" aria-hidden="true"><span>Workstation name</span><span>Cycle time</span><span style="text-align:right">Order / remove</span></div>
+      <div id="stations" aria-live="polite"></div>
+      <div id="validation" class="error" role="alert"></div>
+      <div class="bar"><button id="add-station" class="primary" type="button">+ Add workstation</button><span id="station-count" class="hint"></span></div>
+    </section>
+    <section class="panel" aria-labelledby="summary-title">
+      <h2 id="summary-title">Line summary</h2>
+      <div class="kpis">
+        <div class="kpi"><span>Bottleneck workstation</span><strong id="bottleneck">—</strong><small id="bottleneck-time">—</small></div>
+        <div class="kpi"><span>Theoretical steady output</span><strong id="throughput">—</strong><small>units per hour</small></div>
+        <div class="kpi"><span>Line balance efficiency</span><strong id="balance">—</strong><small>assuming one operator per station</small></div>
+        <div class="kpi"><span>First unit from empty start</span><strong id="first-unit">—</strong><small id="total-work">—</small></div>
+      </div>
+      <h2 style="margin-top:21px">Process flow</h2>
+      <div id="flow" class="flow" aria-label="Workstation process flow"></div>
+    </section>
+    <section class="panel" aria-labelledby="clock-title">
+      <h2 id="clock-title">Illustrative output clock</h2>
+      <div class="clockbar"><button id="play" class="primary" type="button">Start</button><button id="reset" type="button">Reset</button><label class="hint" for="speed">Simulation speed</label><select id="speed"><option value="1">1×</option><option value="5" selected>5×</option><option value="10">10×</option><option value="30">30×</option></select><div class="clock" id="clock" aria-label="Elapsed time">00:00</div></div>
+      <div class="output" id="output" aria-live="polite">0 completed units</div>
+      <p class="note">From an empty line, the first unit target occurs after the sum of all workstation cycle times. After that, the target increases by one unit every bottleneck interval. This is theoretical: it assumes continuous input, no losses, and enough space for work in process. It does not model operator walking, machine dependencies, breaks, or variability.</p>
+    </section>
+    <section class="panel" aria-labelledby="scenario-title">
+      <h2 id="scenario-title">Named scenarios</h2>
+      <div class="save-grid">
+        <label>Scenario name<input id="scenario-name" class="scenario-name" maxlength="60" placeholder="e.g. Balanced 4-station line"></label>
+        <button id="save-scenario" class="primary" type="button">Save in this browser</button>
+        <label>Saved scenarios<select id="saved-scenarios" class="saved-select"><option value="">No saved scenarios</option></select></label>
+        <button id="load-scenario" type="button">Load</button>
+        <button id="delete-scenario" class="danger" type="button">Delete</button>
+      </div>
+      <div id="storage-message" class="notice">Saved scenarios stay in this browser's local storage; they are not uploaded or shared.</div>
+    </section>
+  </main>
+  <script type="module" src="./line-builder.mjs"></script>
+</body>
+</html>
