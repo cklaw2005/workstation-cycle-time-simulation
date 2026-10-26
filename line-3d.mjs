@@ -4,17 +4,26 @@ import { outputCountAt, summarizeLine } from './line-model.mjs';
 import { parseSavedScenarios } from './line-builder-state.mjs';
 import { getUnitSchedule } from './line-schedule.mjs';
 import { buildUStationLayout } from './u-layout.mjs';
+import { calculateTaktPlan, balanceWorkAcrossOperators } from './takt-model.mjs';
 
 const STORAGE_KEY = 'workstation-cycle-time-scenarios-v1';
 const DEMO_LINE = [40, 60, 45, 48, 50, 52, 55, 50].map((cycleSeconds, index) => ({
   id: `demo-${index + 1}`, name: `Station ${index + 1}`, cycleSeconds,
 }));
+// Generic teaching scenarios preserve 720 seconds of assumed manual work content.
+const BEFORE_LINE = Array.from({length: 6}, (_, index) => ({
+  id: `before-${index + 1}`, name: `Operator ${index + 1}`, cycleSeconds: 120,
+}));
+const AFTER_LINE = Array.from({length: 3}, (_, index) => ({
+  id: `after-${index + 1}`, name: `Operator ${index + 1}`, cycleSeconds: 240,
+}));
 const $ = selector => document.querySelector(selector);
 const sceneHost = $('#scene-wrap');
 const warning = $('#error');
-let line = DEMO_LINE.map(station => ({...station}));
+let line = AFTER_LINE.map(station => ({...station}));
 let scenarios = [];
 let activeScenario = '';
+let balancedLine = null;
 let elapsed = 0;
 let running = false;
 let lastFrame = 0;
@@ -42,12 +51,72 @@ function updateSummary() {
   const summary = summarizeLine(line);
   bottleneckIndex = line.findIndex(station => Number(station.cycleSeconds) === summary.bottleneckSeconds);
   $('#station-count').textContent = String(line.length);
-  $('#scenario-name').textContent = activeScenario ? `Scenario · ${activeScenario}` : 'Illustrative example values';
+  $('#scenario-name').textContent = activeScenario || 'Illustrative after-improvement values';
   $('#bottleneck').textContent = summary.bottleneckStations.join(', ');
   $('#bottleneck-time').textContent = `${summary.bottleneckSeconds.toLocaleString(undefined,{maximumFractionDigits:2})} sec / unit`;
   $('#throughput').textContent = summary.unitsPerHour.toLocaleString(undefined,{maximumFractionDigits:2});
-  $('#line-title').textContent = `${line.length} workstations · U-shaped schematic view`;
+  $('#line-title').textContent = `${line.length} operator workstations · U-shaped schematic view`;
+  updateTaktLesson();
   updateClock();
+}
+
+function updateTaktLesson() {
+  const availableMinutes = Number($('#available-minutes').value);
+  const demand = Number($('#customer-demand').value);
+  const applyButton = $('#apply-staffing');
+  if (!Number.isFinite(availableMinutes) || availableMinutes <= 0 || !Number.isInteger(demand) || demand <= 0) {
+    $('#takt-value').textContent = 'Enter valid values';
+    $('#work-content').textContent = '—'; $('#bottleneck-ct').textContent = '—';
+    $('#minimum-operators').textContent = '—'; $('#modeled-output').textContent = '—';
+    $('#capacity-status').dataset.state = 'short';
+    $('#capacity-title').textContent = 'Enter positive available time and whole-unit demand';
+    $('#capacity-detail').textContent = 'Demand must be a whole number of units; available minutes must be greater than zero.';
+    $('#balance-chart').replaceChildren(); applyButton.disabled = true;
+    return;
+  }
+  const plan = calculateTaktPlan({availableTimeSeconds: availableMinutes * 60, customerDemand: demand, stations: line});
+  const seconds = Math.round(plan.taktSeconds);
+  $('#takt-value').textContent = `${formatTime(plan.taktSeconds)} / unit`;
+  $('#work-content').textContent = `${plan.workContentSeconds.toLocaleString(undefined,{maximumFractionDigits:2})} sec`;
+  $('#bottleneck-ct').textContent = `${plan.bottleneckSeconds.toLocaleString(undefined,{maximumFractionDigits:2})} sec`;
+  const bottlenecks = summarizeLine(line).bottleneckStations.join(', ');
+  $('#bottleneck-label').textContent = `${bottlenecks} · slowest workload`;
+  $('#minimum-operators').textContent = plan.minimumOperators > 12 ? '12+' : String(plan.minimumOperators);
+  $('#staffing-detail').textContent = `theoretical floor · current line has ${line.length}`;
+  $('#modeled-output').textContent = String(plan.modeledShiftOutput);
+  $('#output-detail').textContent = `units · demand is ${demand} / shift`;
+  const status = $('#capacity-status');
+  status.dataset.state = plan.meetsDemand ? 'ok' : 'short';
+  $('#capacity-title').textContent = plan.meetsDemand ? 'This line meets the demand rate' : 'Capacity shortfall · bottleneck is slower than takt';
+  $('#capacity-detail').textContent = `Bottleneck ${plan.bottleneckSeconds.toFixed(0)} sec ${plan.meetsDemand ? '≤' : '>'} takt ${seconds} sec. ${plan.meetsDemand ? 'The slowest operator can keep pace with the customer beat.' : 'At this bottleneck the line cannot keep pace; rebalance work or add capacity.'} Theoretical shift output is about ${plan.theoreticalUnitsPerShift.toFixed(1)} units.`;
+  $('#apply-note').textContent = plan.minimumOperators > 12
+    ? 'The estimate exceeds the 12-operator demo limit; reduce work content or revise the planning inputs.'
+    : `Evenly divide ${plan.workContentSeconds.toFixed(0)} sec of assumed manual work across ${plan.minimumOperators} operators. Task sequence and feasibility still need review.`;
+  applyButton.textContent = plan.minimumOperators > 12 ? 'Staffing estimate exceeds demo limit' : `Balance work across ${plan.minimumOperators} operator${plan.minimumOperators===1?'':'s'}`;
+  applyButton.disabled = plan.minimumOperators > 12;
+  document.querySelectorAll('.compare-card').forEach(card=>card.classList.remove('active'));
+  if (line.length===6 && Math.abs(plan.workContentSeconds-720)<1e-6) $('#before-card').classList.add('active');
+  if (line.length===3 && Math.abs(plan.workContentSeconds-720)<1e-6) $('#after-card').classList.add('active');
+  renderBalanceChart(plan.taktSeconds);
+}
+
+function renderBalanceChart(taktSeconds) {
+  const chart = $('#balance-chart');
+  chart.replaceChildren();
+  $('#chart-title').textContent = `Current operator work content · ${line.length} people`;
+  const max = Math.max(taktSeconds, ...line.map(station=>Number(station.cycleSeconds))) * 1.08;
+  const taktPercent = Math.min(100, taktSeconds / max * 100);
+  const scale = document.createElement('div'); scale.className='chart-scale'; scale.style.setProperty('--takt-pct',`${taktPercent}%`);
+  const mark=document.createElement('span'); mark.textContent=`TAKT ${formatTime(taktSeconds)}`; scale.append(mark); chart.append(scale);
+  line.forEach((station,index)=>{
+    const row=document.createElement('div'); row.className='chart-row';
+    const label=document.createElement('span'); label.className='op-label'; label.textContent=station.name;
+    const track=document.createElement('div'); track.className='bar-track'; track.style.setProperty('--takt-pct',`${taktPercent}%`);
+    const fill=document.createElement('div'); fill.className=`bar-fill${Number(station.cycleSeconds)>taktSeconds?' over':''}`; fill.style.width=`${Math.min(100,Number(station.cycleSeconds)/max*100)}%`;
+    const lineMark=document.createElement('i'); lineMark.className='takt-marker'; track.append(fill,lineMark);
+    const value=document.createElement('span'); value.className='bar-value'; value.textContent=`${Number(station.cycleSeconds).toFixed(0)} sec`;
+    row.append(label,track,value); chart.append(row);
+  });
 }
 
 function updateClock() {
@@ -236,7 +305,7 @@ function readScenarios() {
     const parsed=parseSavedScenarios(localStorage.getItem(STORAGE_KEY));
     scenarios=parsed.scenarios;
     const select=$('#scenario');
-    for (const scenario of scenarios) { const option=document.createElement('option'); option.value=scenario.id; option.textContent=scenario.name; select.append(option); }
+    for (const scenario of scenarios) { const option=document.createElement('option'); option.value=`saved:${scenario.id}`; option.textContent=`Your line · ${scenario.name}`; select.append(option); }
     if (parsed.rejectedCount) { warning.textContent=`${parsed.rejectedCount} invalid saved scenario(s) were skipped.`; warning.classList.add('visible'); }
   } catch { scenarios=[]; warning.textContent='Browser storage is unavailable; the example line is ready to simulate.'; warning.classList.add('visible'); }
 }
@@ -245,9 +314,37 @@ $('#play').addEventListener('click',()=>{running=!running;lastFrame=0;$('#play')
 $('#reset').addEventListener('click',reset);
 $('#speed').addEventListener('change',()=>{lastFrame=0;});
 $('#scenario').addEventListener('change',event=>{
-  const selected=scenarios.find(item=>item.id===event.target.value);
-  line=selected ? selected.stations.map(item=>({...item})) : DEMO_LINE.map(item=>({...item}));
-  activeScenario=selected?.name ?? '';
+  const value=event.target.value;
+  const selected=scenarios.find(item=>`saved:${item.id}`===value);
+  if (value==='after') {
+    line=AFTER_LINE.map(station=>({...station}));
+    activeScenario='Illustrative after-improvement values';
+  } else if (value==='custom') {
+    line=DEMO_LINE.map(station=>({...station}));
+    activeScenario='Illustrative eight-station line';
+  } else if (value==='balanced') {
+    line=balancedLine ? balancedLine.map(station=>({...station})) : balanceWorkAcrossOperators(720,3);
+    activeScenario='Illustrative balanced staffing plan';
+  } else if (value==='before') {
+    line=BEFORE_LINE.map(station=>({...station}));
+    activeScenario='Illustrative before-improvement values';
+  } else if (selected) {
+    line=selected.stations.map(item=>({...item}));
+    activeScenario=`Your saved line · ${selected.name}`;
+  }
+  reset(); updateSummary(); buildScene();
+});
+$('#available-minutes').addEventListener('input',updateTaktLesson);
+$('#customer-demand').addEventListener('input',updateTaktLesson);
+$('#reset-planning').addEventListener('click',()=>{
+  $('#available-minutes').value='450'; $('#customer-demand').value='110'; updateTaktLesson();
+});
+$('#apply-staffing').addEventListener('click',()=>{
+  const plan=calculateTaktPlan({availableTimeSeconds:Number($('#available-minutes').value)*60,customerDemand:Number($('#customer-demand').value),stations:line});
+  line=balanceWorkAcrossOperators(plan.workContentSeconds,plan.minimumOperators);
+  balancedLine=line.map(station=>({...station}));
+  activeScenario=`Illustrative balanced staffing · ${line.length} operators`;
+  $('#scenario').value='balanced';
   reset(); updateSummary(); buildScene();
 });
 $('#top').addEventListener('click',()=>{

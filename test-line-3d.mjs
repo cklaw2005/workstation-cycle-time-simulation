@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
 import { outputCountAt } from './line-model.mjs';
 import { buildUStationLayout } from './u-layout.mjs';
 import { getUnitSchedule } from './line-schedule.mjs';
@@ -23,5 +24,13 @@ assert.deepEqual(second.map(job => [job.startSeconds, job.finishSeconds]), [[40,
 assert.deepEqual([145, 204.99, 205, 264.99, 265].map(t => outputCountAt(t, example)), [1, 1, 2, 2, 3]);
 assert.throws(() => getUnitSchedule(example, -1), RangeError);
 assert.throws(() => getUnitSchedule([], 0), RangeError);
+
+const html = await readFile(new URL('./line-3d.html', import.meta.url), 'utf8');
+assert.match(html, /id="available-minutes"/);
+assert.match(html, /id="customer-demand"/);
+assert.match(html, /bottleneck cycle time must be less than or equal to takt time/i);
+assert.match(html, /id="capacity-status"/);
+assert.match(html, /Before improvement · 6 operators/);
+assert.match(html, /After improvement · 3 operators/);
 
 console.log('PASS: U-layout generation, FIFO workstation schedule, and shared output boundaries.');
