@@ -308,14 +308,25 @@ function renderFrame(timestamp) {
 
 function reset() { running=false; lastFrame=0; $('#play').textContent='Start'; elapsed=0; updateClock(); drawParts(); }
 function readScenarios() {
+  const select=$('#scenario');
+  const previousValue=select.value;
+  select.querySelectorAll('option[data-saved-scenario="true"]').forEach(option=>option.remove());
   try {
     const parsed=parseSavedScenarios(localStorage.getItem(STORAGE_KEY));
     scenarios=parsed.scenarios;
-    const select=$('#scenario');
-    for (const scenario of scenarios) { const option=document.createElement('option'); option.value=`saved:${scenario.id}`; option.textContent=`Your line · ${scenario.name}`; select.append(option); }
+    for (const scenario of scenarios) { const option=document.createElement('option'); option.dataset.savedScenario='true'; option.value=`saved:${scenario.id}`; option.textContent=`Your line · ${scenario.name}`; select.append(option); }
+    if ([...select.options].some(option=>option.value===previousValue)) select.value=previousValue;
+    else if (previousValue.startsWith('saved:')) {
+      select.value='after';
+      select.dispatchEvent(new Event('change'));
+    }
     if (parsed.rejectedCount) { warning.textContent=`${parsed.rejectedCount} invalid saved scenario(s) were skipped.`; warning.classList.add('visible'); }
   } catch { scenarios=[]; warning.textContent='Browser storage is unavailable; the example line is ready to simulate.'; warning.classList.add('visible'); }
 }
+
+window.addEventListener('storage',event=>{
+  if (event.key===STORAGE_KEY || event.key===null) readScenarios();
+});
 
 $('#play').addEventListener('click',()=>{running=!running;lastFrame=0;$('#play').textContent=running?'Pause':'Start';});
 $('#reset').addEventListener('click',reset);
